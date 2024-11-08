@@ -142,7 +142,3 @@ for i in range(num_classes):
     class_accuracy = class_correct[i] / class_total[i] if class_total[i] > 0 else 0
     print("Class {} Accuracy: {:.4f}".format(i, class_accuracy))
 
-
-
-
-
