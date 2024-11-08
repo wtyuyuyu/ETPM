@@ -3,22 +3,36 @@ Code for **Dynamic tactile process sensing on the basis of fingerprint-like sens
 ### 1. ETPM.py
 
 **Overview**<br />
-This Python file serves as the backbone for data ingestion and preprocessing, as well as implementing machine learning algorithms for texture classification.<br />
+This repository contains code for training an Early Classification model using CNN-LSTM architecture with the purpose of making early predictions in time-series classification tasks. The model is designed to predict the class label of a given time-series sequence at an early time step while maximizing classification performance and minimizing the time taken for prediction.<br />
 
 **Dependencies**<br />
 Python 3.x, PyTorch, Scikit-learn, NumPy, Pandas, tqdm, argparse
 
 **Methods and Classes**<br />
-parse_args()
-    This function parses command-line arguments to configure the training process. The parameters include:
-        alpha: Coefficient for the early reward loss function.
-        epsilon: Threshold for the early stopping reward function.
-        learning-rate: Learning rate for the optimizer.
-        weight-decay: Weight decay for the optimizer.
-        patience: Number of epochs to wait before early stopping if validation loss doesn't improve.
-        device: Specifies whether to use GPU or CPU for training.
-        epochs: Number of training epochs.
-        sequencelength: Length of each input sequence.
-        batchsize: Batch size for training.
-        snapshot: Path to save the trained model.
-        resume: Whether to resume training from a saved model.
+- parse_args()<br />
+This function parses command-line arguments to configure the training process. The parameters include:
+    - alpha: Coefficient for the early reward loss function.
+    - epsilon: Threshold for the early stopping reward function.
+    - learning-rate: Learning rate for the optimizer.
+    - weight-decay: Weight decay for the optimizer.
+    - epochs: Number of training epochs.
+    - sequencelength: Length of each input sequence.
+    - batchsize: Batch size for training.
+
+- EarlyRNN()<br />
+This is the RNN model used for early classification. It is designed to process sequential data and make predictions as early as possible within the sequence. The architecture consists of:
+    - Input layer with dimensionality input_dim.
+    - One or more CNN-LSTM layers, each with hidden_dim number of hidden units.
+    - A stopping decision head that determines when to make the final prediction.
+    - Dropout layers to prevent overfitting.
+ 
+- EarlyRewardLoss<br />
+A custom loss function that combines traditional classification loss with an additional reward term based on how early the prediction is made.
+The reward encourages the model to make predictions sooner rather than later, helping to reduce prediction latency.
+    - alpha: A hyperparameter that controls the trade-off between classification loss and early reward. 
+    - weight: Used to provide class weights for the negative log-likelihood loss (NLLLoss) calculation.
+
+ ****
+ 
+ ### 2. CNNLSTM.py
+ **Overview**<br />
