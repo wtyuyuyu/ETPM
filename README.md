@@ -36,3 +36,13 @@ The reward encourages the model to make predictions sooner rather than later, he
  
  ### 2. CNNLSTM.py
  **Overview**<br />
+ This Python file implements a Convolutional Neural Network (CNN) combined with a Long Short-Term Memory (LSTM) network for time-series classification.<br />
+
+ **Dependencies**<br />
+ Python 3.x, PyTorch, NumPy
+
+ ****
+
+ ### 3. Data
+  **Overview**<br />
+ A small dataset used to demonstrate the model's performance.<br />
