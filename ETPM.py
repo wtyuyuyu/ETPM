@@ -1,9 +1,9 @@
+from torch.utils.data import DataLoader
 from ultis.earlyrnn_500 import EarlyRNN
 import torch
 from tqdm import tqdm
 from ultis.earlystop_loss import EarlyRewardLoss
 import numpy as np
-from ultis.visdom import VisdomLogger
 from ultis.readdatalabel import *
 import sklearn.metrics
 import pandas as pd
@@ -13,27 +13,22 @@ import os
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run Early Classification training...')
-    parser.add_argument('--alpha', type=float, default=0.6, help="trade-off parameter of earliness and accuracy (eq 6): "
-                                                                 "1=full weight on accuracy; 0=full weight on earliness")
-    parser.add_argument('--epsilon', type=float, default=10, help="additive smoothing parameter that helps the "
-                                                                  "model recover from too early classificaitons (eq 7)")
-    parser.add_argument('--learning-rate', type=float, default=1e-2, help="Optimizer learning rate")
-    parser.add_argument('--weight-decay', type=float, default=0, help="weight_decay")
-    parser.add_argument('--patience', type=int, default=30, help="Early stopping patience")
+    parser.add_argument('--alpha', type=float, default=0.5)
+    parser.add_argument('--epsilon', type=float, default=10)
+    parser.add_argument('--learning-rate', type=float, default=1e-2)
+    parser.add_argument('--weight-decay', type=float, default=0)
+    parser.add_argument('--patience', type=int, default=30)
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument('--epochs', type=int, default=200, help="number of training epochs")  # 100
-    parser.add_argument('--sequencelength', type=int, default=500, help="sequencelength of the time series. If samples are shorter, "
-                                                                "they are zero-padded until this length; "
-                                                                "if samples are longer, they will be undersampled")
-    parser.add_argument('--batchsize', type=int, default=256, help="number of samples per batch")
-    parser.add_argument('--snapshot', type=str, default="./snapshots/model.pth", help="pytorch state dict snapshot file")
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--sequencelength', type=int, default=500)
+    parser.add_argument('--batchsize', type=int, default=256)
+    parser.add_argument('--snapshot', type=str, default="./model.pth")
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()
 
     if args.patience < 0:
         args.patience = None
     return args
-
 
 def expand_dimensions(input_tensor, target_dim=500):
     original_dim = input_tensor.size()
@@ -42,10 +37,10 @@ def expand_dimensions(input_tensor, target_dim=500):
 
 
 def main(args):
-    traindataloader, testdataloader = create_dataloaders(data_dir='./data/30class/', batch_size=256)
+    traindataloader, testdataloader = create_dataloaders(data_dir='../data/', batch_size=256)
 
     nclasses = 30
-    input_dim = 32 # 32
+    input_dim = 32
     hidden_dim = 64
     num_layers = 2
     dropout = 0.6
@@ -71,10 +66,8 @@ def main(args):
                                           os.path.basename(args.snapshot).replace(".pth", "_optimizer.pth")
                                           )
     else:
-        print('train with no param')
         train_stats = []
         start_epoch = 1
-    visdom_logger = VisdomLogger(log_to_filename='./snapshots/1.log')
 
     not_improved = 0
     with tqdm(range(start_epoch, args.epochs + 1)) as pbar:
@@ -82,11 +75,13 @@ def main(args):
             trainloss = train_epoch(model, traindataloader, optimizer, criterion, device=args.device)
             testloss, stats = test_epoch(model, testdataloader, criterion, args.device)
 
+
             precision, recall, fscore, support = sklearn.metrics.precision_recall_fscore_support(
                 y_pred=stats["predictions_at_t_stop"][:, 0], y_true=stats["targets"][:, 0], average="macro",
                 zero_division=0)
             accuracy = sklearn.metrics.accuracy_score(
                 y_pred=stats["predictions_at_t_stop"][:, 0], y_true=stats["targets"][:, 0])
+
             kappa = sklearn.metrics.cohen_kappa_score(
                 stats["predictions_at_t_stop"][:, 0], stats["targets"][:, 0])
             classification_loss = stats["classification_loss"].mean()
@@ -94,6 +89,7 @@ def main(args):
             earliness = 1 - (stats["t_stop"].mean() / (args.sequencelength - 1))
             stats["confusion_matrix"] = sklearn.metrics.confusion_matrix(y_pred=stats["predictions_at_t_stop"][:, 0],
                                                                          y_true=stats["targets"][:, 0])
+
             train_stats.append(
                 dict(
                     epoch=epoch,
@@ -110,13 +106,33 @@ def main(args):
                 )
             )
 
+            df = pd.DataFrame(train_stats).set_index("epoch")
+
+            savemsg = ""
+            if len(df) > 2:
+                if testloss < df.testloss[:-1].values.min():
+                    savemsg = f"saving model to {args.snapshot}"
+                    os.makedirs(os.path.dirname(args.snapshot), exist_ok=True)
+                    torch.save(model.state_dict(), args.snapshot)
+                    optimizer_snapshot = os.path.join(os.path.dirname(args.snapshot),
+                                                      os.path.basename(args.snapshot).replace(".pth", "_optimizer.pth")
+                                                      )
+                    torch.save(optimizer.state_dict(), optimizer_snapshot)
+                    df.to_csv(args.snapshot + ".csv")
+                    not_improved = 0
+                else:
+                    not_improved += 1
+                    if args.patience is not None:
+                        savemsg = f"early stopping in {args.patience - not_improved} epochs."
+                    else:
+                        savemsg = ""
+
             pbar.set_description(f"epoch {epoch}: trainloss {trainloss:.2f}, testloss {testloss:.2f}, "
                      f"accuracy {accuracy:.2f}, earliness {earliness:.2f}. "
                      f"classification loss {classification_loss:.2f}, earliness reward {earliness_reward:.2f}. {savemsg}")
 
             if args.patience is not None:
                 if not_improved > args.patience:
-                    print(f"stopping training. testloss {testloss:.2f} did not improve in {args.patience} epochs.")
                     break
 
 
@@ -148,6 +164,13 @@ def test_epoch(model, dataloader, criterion, device):
         X, y_true = X.to(device), y_true.to(device)
         log_class_probabilities, probability_stopping, predictions_at_t_stop, t_stop = model.predict(X)
         loss, stat = criterion(log_class_probabilities, probability_stopping, y_true, return_stats=True)
+
+        stat["loss"] = loss.cpu().detach().numpy()
+        stat["probability_stopping"] = probability_stopping.cpu().detach().numpy()
+        stat["class_probabilities"] = log_class_probabilities.exp().cpu().detach().numpy()
+        stat["predictions_at_t_stop"] = predictions_at_t_stop.unsqueeze(-1).cpu().detach().numpy()
+        stat["t_stop"] = t_stop.unsqueeze(-1).cpu().detach().numpy()
+        stat["targets"] = y_true.cpu().detach().numpy()
 
         stats.append(stat)
 
